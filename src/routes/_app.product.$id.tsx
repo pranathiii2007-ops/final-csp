@@ -20,7 +20,18 @@ type Product = {
   description: string | null; image_url: string; area: string | null;
   discount_percent: number; created_at: string;
 };
-type Profile = { id: string; shop_name: string; area: string | null; phone: string | null };
+type Profile = {
+  id: string;
+  shop_name: string;
+  brand_name?: string | null;
+  logo_url?: string | null;
+  description?: string | null;
+  area: string | null;
+  location?: string | null;
+  phone: string | null;
+  website?: string | null;
+  social_links?: { whatsapp?: string; instagram?: string } | null;
+};
 type Review = { id: string; reviewer_name: string; rating: number; comment: string | null; created_at: string; reviewer_id: string };
 
 function ProductPage() {
@@ -37,7 +48,7 @@ function ProductPage() {
     setProduct((p as Product) ?? null);
     if (p) {
       const [{ data: pr }, { data: rv }] = await Promise.all([
-        supabase.from("profiles").select("id,shop_name,area,phone").eq("id", p.seller_id).maybeSingle(),
+        supabase.from("profiles").select("id,shop_name,brand_name,logo_url,description,area,location,phone,website,social_links").eq("id", p.seller_id).maybeSingle(),
         supabase.from("reviews").select("*").eq("product_id", id).order("created_at", { ascending: false }),
       ]);
       setSeller((pr as Profile) ?? null);
@@ -75,8 +86,22 @@ function ProductPage() {
         <div>
           <h1 className="font-display text-4xl font-semibold leading-tight">{product.name}</h1>
           {seller && (
-            <div className="mt-2 flex items-center gap-1.5 text-sm text-muted-foreground">
-              <MapPin className="h-3.5 w-3.5" /> {seller.shop_name}{seller.area ? ` · ${seller.area}` : ""}
+            <div className="mt-3 flex items-center gap-3">
+              {seller.logo_url ? (
+                <img src={seller.logo_url} alt={seller.brand_name || seller.shop_name} className="h-10 w-10 rounded-full object-cover border border-border" />
+              ) : null}
+              <div>
+                <div className="font-semibold text-foreground">{seller.brand_name || seller.shop_name}</div>
+                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <MapPin className="h-3.5 w-3.5" /> {seller.location || seller.area || "Local seller"}
+                  {seller.website && (
+                    <>
+                      <span>·</span>
+                      <a href={seller.website} target="_blank" rel="noreferrer" className="text-primary hover:underline">Website</a>
+                    </>
+                  )}
+                </div>
+              </div>
             </div>
           )}
 

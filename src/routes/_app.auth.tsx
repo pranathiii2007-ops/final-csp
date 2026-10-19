@@ -34,32 +34,41 @@ function AuthPage() {
     if (!loading && user) nav({ to: redirect || "/dashboard" });
   }, [user, loading, nav, redirect]);
 
-  const toEmail = (u: string) => `${u.trim().toLowerCase().replace(/[^a-z0-9_]/g, "")}@makers.local`;
+  const resolveEmail = (u: string) => {
+    const trimmed = u.trim().toLowerCase();
+    if (trimmed.includes("@")) return trimmed;
+    const clean = trimmed.replace(/[^a-z0-9_]/g, "");
+    return `${clean}@makers.local`;
+  };
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErr(null);
-    const cleanUser = username.trim().toLowerCase().replace(/[^a-z0-9_]/g, "");
-    if (cleanUser.length < 3) { setErr("Username must be at least 3 letters/numbers."); return; }
-    const weakPasswords = new Set([
-      "12345","123456","1234567","12345678","123456789","1234567890",
-      "password","password1","qwerty","qwerty123","abc123","111111",
-      "000000","admin","letmein","iloveyou",
-    ]);
-    if (password.length < 4) {
-      setErr("Please choose a password with at least 4 characters.");
+    const rawInput = username.trim().toLowerCase();
+    if (!rawInput.includes("@")) {
+      const cleanUser = rawInput.replace(/[^a-z0-9_]/g, "");
+      if (cleanUser.length < 3) {
+        setErr("Username must be at least 3 letters/numbers.");
+        return;
+      }
+    } else {
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(rawInput)) {
+        setErr("Please enter a valid email address.");
+        return;
+      }
+    }
+
+    if (password.length < 6) {
+      setErr("Password must be at least 6 characters.");
       return;
     }
-    if (weakPasswords.has(password.toLowerCase())) {
-      setErr("That password is too common. Please choose a different one.");
-      return;
-    }
+
     setBusy(true);
     try {
-      const email = toEmail(cleanUser);
+      const email = resolveEmail(rawInput);
       if (mode === "signup") {
         if (!shopName.trim()) throw new Error("Shop name is required");
-        const { error } = await supabase.auth.signUp({
+        const { data, error } = await supabase.auth.signUp({
           email,
           password,
           options: {
@@ -67,10 +76,48 @@ function AuthPage() {
             data: { shop_name: shopName.trim(), area: area.trim(), phone: phone.trim() },
           },
         });
-        if (error) throw error;
+        if (error) {
+          const msg = error.message.toLowerCase();
+          const errCode = (error as unknown as { code?: string; error_code?: string }).code || (error as unknown as { error_code?: string }).error_code;
+          
+          if (
+            errCode === "weak_password" ||
+            msg.includes("weak") ||
+            msg.includes("pwned") ||
+            msg.includes("guess")
+          ) {
+            throw new Error("Password is too common or easily guessable. Please choose a stronger password.");
+          }
+
+          if (
+            errCode === "user_already_exists" ||
+            msg.includes("already registered") ||
+            msg.includes("already exists") ||
+            msg.includes("identity")
+          ) {
+            throw new Error("An account with this email/username already exists. Please sign in or use a different one.");
+          }
+
+          throw error;
+        }
+
+        if (data?.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) {
+          throw new Error("An account with this email/username already exists. Please sign in or use a different one.");
+        }
+
+        if (data?.user && !data.session) {
+          setErr("Account created! If email confirmation is enabled, please verify your email before signing in.");
+          return;
+        }
       } else {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
-        if (error) throw error;
+        if (error) {
+          const msg = error.message.toLowerCase();
+          if (msg.includes("invalid login credentials")) {
+            throw new Error("Invalid username/email or password. Please try again.");
+          }
+          throw error;
+        }
       }
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : "Something went wrong");
@@ -112,15 +159,15 @@ function AuthPage() {
             </div>
           </>
         )}
-        <Field label="Username *">
+        <Field label="Username or Email *">
           <input value={username} onChange={(e) => setUsername(e.target.value)}
-            placeholder="lakshmi_crafts" autoComplete="username" className="input" required />
-          <span className="mt-1 block text-[11px] text-muted-foreground">Letters and numbers only. No email needed.</span>
+            placeholder="lakshmi_crafts or seller@example.com" autoComplete="username" className="input" required />
+          <span className="mt-1 block text-[11px] text-muted-foreground">Use a username (e.g. lakshmi_crafts) or your email address.</span>
         </Field>
         <Field label="Password *">
           <input type="password" value={password} onChange={(e) => setPassword(e.target.value)}
-            className="input" required minLength={4} autoComplete={mode === "signup" ? "new-password" : "current-password"} />
-          <span className="mt-1 block text-[11px] text-muted-foreground">Use any password you'll remember (avoid common ones like 12345).</span>
+            className="input" required minLength={6} autoComplete={mode === "signup" ? "new-password" : "current-password"} />
+          <span className="mt-1 block text-[11px] text-muted-foreground">At least 6 characters. Any simple password you'll remember is accepted.</span>
         </Field>
 
         {err && <p className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">{err}</p>}

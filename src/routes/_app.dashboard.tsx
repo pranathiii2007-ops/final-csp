@@ -1,6 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState, useCallback } from "react";
-import { Plus, Pencil, Trash2, Package, Inbox, MapPin, IndianRupee, ImagePlus, X, Loader2, Percent, LogOut } from "lucide-react";
+import { Plus, Pencil, Trash2, Package, Inbox, MapPin, IndianRupee, ImagePlus, X, Loader2, Percent, LogOut, Store, Globe, Check, ExternalLink, User } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
 
@@ -40,12 +40,30 @@ type Inquiry = {
   products?: { name: string } | null;
 };
 
+type BusinessProfile = {
+  id: string;
+  shop_name: string;
+  brand_name: string | null;
+  logo_url: string | null;
+  description: string | null;
+  category: string | null;
+  location: string | null;
+  area: string | null;
+  phone: string | null;
+  website: string | null;
+  social_links: {
+    whatsapp?: string;
+    instagram?: string;
+  } | null;
+};
+
 function DashboardPage() {
   const nav = useNavigate();
   const { user, loading, signOut } = useAuth();
-  const [tab, setTab] = useState<"products" | "inquiries">("products");
+  const [tab, setTab] = useState<"products" | "inquiries" | "profile">("products");
   const [products, setProducts] = useState<Product[]>([]);
   const [inquiries, setInquiries] = useState<Inquiry[]>([]);
+  const [profile, setProfile] = useState<BusinessProfile | null>(null);
   const [editing, setEditing] = useState<Product | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [busy, setBusy] = useState(true);
@@ -57,12 +75,30 @@ function DashboardPage() {
   const refresh = useCallback(async () => {
     if (!user) return;
     setBusy(true);
-    const [{ data: p }, { data: i }] = await Promise.all([
+    const [{ data: p }, { data: i }, { data: pr }] = await Promise.all([
       supabase.from("products").select("*").eq("seller_id", user.id).order("created_at", { ascending: false }),
       supabase.from("inquiries").select("*, products(name)").eq("seller_id", user.id).order("created_at", { ascending: false }),
+      supabase.from("profiles").select("*").eq("id", user.id).maybeSingle(),
     ]);
     setProducts((p ?? []) as Product[]);
     setInquiries((i ?? []) as Inquiry[]);
+    if (pr) {
+      setProfile(pr as unknown as BusinessProfile);
+    } else {
+      setProfile({
+        id: user.id,
+        shop_name: (user.user_metadata?.shop_name as string) || user.email?.split("@")[0] || "My Shop",
+        brand_name: (user.user_metadata?.brand_name as string) || (user.user_metadata?.shop_name as string) || null,
+        logo_url: null,
+        description: null,
+        category: null,
+        location: (user.user_metadata?.area as string) || null,
+        area: (user.user_metadata?.area as string) || null,
+        phone: (user.user_metadata?.phone as string) || null,
+        website: null,
+        social_links: {},
+      });
+    }
     setBusy(false);
   }, [user]);
 
@@ -110,6 +146,10 @@ function DashboardPage() {
                 <Inbox className="h-4 w-4" /> Inquiries ({inquiries.length})
                 {unread > 0 && <span className="ml-1 rounded-full bg-accent px-2 py-0.5 text-[10px] font-bold text-accent-foreground">{unread} new</span>}
               </button>
+              <button onClick={() => setTab("profile")}
+                className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition ${tab === "profile" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}>
+                <Store className="h-4 w-4" /> My Business Profile
+              </button>
             </div>
             {tab === "products" && (
               <button onClick={openNew} className="inline-flex items-center gap-2 rounded-full bg-foreground px-4 py-2 text-sm font-semibold text-background hover:opacity-90">
@@ -123,8 +163,10 @@ function DashboardPage() {
               <div className="grid place-items-center py-16"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
             ) : tab === "products" ? (
               <ProductsTab products={products} onEdit={openEdit} onDelete={remove} onAdd={openNew} />
-            ) : (
+            ) : tab === "inquiries" ? (
               <InquiriesTab inquiries={inquiries} onChanged={refresh} />
+            ) : (
+              <BusinessProfileTab profile={profile} user={user} onSaved={refresh} />
             )}
           </div>
         </div>
@@ -362,4 +404,201 @@ function ProductFormModal({ initial, sellerId, onClose, onSaved }: {
 
 function F({ label, children }: { label: string; children: React.ReactNode }) {
   return <label className="block"><span className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">{label}</span>{children}</label>;
+}
+
+const CATEGORIES = [
+  "Handmade Crafts", "Crochet & Knitting", "Resin Art", "Candles & Soaps",
+  "Jewellery & Accessories", "Home Décor", "Food & Preserves", "Clothing & Textiles",
+  "Stationery & Cards", "Paintings & Prints", "Pottery & Ceramics", "Other",
+];
+
+function BusinessProfileTab({ profile, user, onSaved }: {
+  profile: BusinessProfile | null;
+  user: { id: string; email?: string };
+  onSaved: () => void;
+}) {
+  const [brandName, setBrandName] = useState(profile?.brand_name ?? "");
+  const [logoUrl, setLogoUrl] = useState(profile?.logo_url ?? "");
+  const [description, setDescription] = useState(profile?.description ?? "");
+  const [category, setCategory] = useState(profile?.category ?? "");
+  const [location, setLocation] = useState(profile?.location ?? "");
+  const [website, setWebsite] = useState(profile?.website ?? "");
+  const [whatsapp, setWhatsapp] = useState(profile?.social_links?.whatsapp ?? "");
+  const [instagram, setInstagram] = useState(profile?.social_links?.instagram ?? "");
+  const [busy, setBusy] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  // Reset form when profile prop changes (e.g. after onSaved refresh)
+  useEffect(() => {
+    setBrandName(profile?.brand_name ?? "");
+    setLogoUrl(profile?.logo_url ?? "");
+    setDescription(profile?.description ?? "");
+    setCategory(profile?.category ?? "");
+    setLocation(profile?.location ?? "");
+    setWebsite(profile?.website ?? "");
+    setWhatsapp(profile?.social_links?.whatsapp ?? "");
+    setInstagram(profile?.social_links?.instagram ?? "");
+  }, [profile]);
+
+  const onFile = (f: File | undefined) => {
+    if (!f) return;
+    const reader = new FileReader();
+    reader.onload = () => setLogoUrl(String(reader.result));
+    reader.readAsDataURL(f);
+  };
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErr(null);
+    setBusy(true);
+
+    const social: Record<string, string> = {};
+    if (whatsapp.trim()) social.whatsapp = whatsapp.trim();
+    if (instagram.trim()) social.instagram = instagram.trim();
+
+    const payload = {
+      id: user.id,
+      brand_name: brandName.trim() || null,
+      logo_url: logoUrl || null,
+      description: description.trim() || null,
+      category: category || null,
+      location: location.trim() || null,
+      website: website.trim() || null,
+      social_links: Object.keys(social).length > 0 ? social : null,
+    };
+
+    const { error } = await supabase.from("profiles").upsert(payload, { onConflict: "id" });
+    setBusy(false);
+    if (error) {
+      setErr(error.message);
+      return;
+    }
+    setSaved(true);
+    setTimeout(() => setSaved(false), 3000);
+    onSaved();
+  };
+
+  return (
+    <div className="mx-auto max-w-2xl">
+      <div className="rounded-3xl border border-border bg-card p-6 sm:p-8">
+        <div className="flex items-center gap-3 border-b border-border pb-5">
+          <div className="grid h-10 w-10 place-items-center rounded-2xl bg-primary/10">
+            <Store className="h-5 w-5 text-primary" />
+          </div>
+          <div>
+            <h2 className="font-display text-xl font-semibold">My Business Profile</h2>
+            <p className="text-sm text-muted-foreground">Shown to buyers browsing your products (optional)</p>
+          </div>
+        </div>
+
+        <form onSubmit={submit} className="mt-6 grid gap-5">
+          {/* Logo */}
+          <F label="Brand logo (optional)">
+            {logoUrl ? (
+              <div className="flex items-center gap-4">
+                <img src={logoUrl} alt="Logo preview" className="h-20 w-20 rounded-2xl object-cover border border-border" />
+                <button type="button" onClick={() => setLogoUrl("")}
+                  className="rounded-full border border-destructive/30 px-3 py-1.5 text-xs font-semibold text-destructive hover:bg-destructive/10">
+                  Remove
+                </button>
+              </div>
+            ) : (
+              <button type="button" onClick={() => fileRef.current?.click()}
+                className="flex w-full flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-border bg-background py-7 text-sm text-muted-foreground hover:border-primary hover:text-foreground">
+                <User className="h-6 w-6" />
+                Upload your brand logo
+              </button>
+            )}
+            <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={(e) => onFile(e.target.files?.[0])} />
+          </F>
+
+          {/* Brand Name */}
+          <F label="Brand / shop name">
+            <input value={brandName} onChange={(e) => setBrandName(e.target.value)}
+              placeholder={profile?.shop_name ?? "e.g. Aishu Crafts"}
+              className="in" />
+          </F>
+
+          {/* Description */}
+          <F label="About your business">
+            <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={3}
+              placeholder="Tell buyers what you make, your story, what makes your products special…"
+              className="in resize-none" />
+          </F>
+
+          {/* Category & Location */}
+          <div className="grid gap-4 sm:grid-cols-2">
+            <F label="Category">
+              <select value={category} onChange={(e) => setCategory(e.target.value)} className="in">
+                <option value="">Select a category</option>
+                {CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </F>
+            <F label="Location / area">
+              <input value={location} onChange={(e) => setLocation(e.target.value)}
+                placeholder="e.g. Visakhapatnam, AP" className="in" />
+            </F>
+          </div>
+
+          {/* Website */}
+          <F label="Website (optional)">
+            <div className="flex items-center rounded-xl border border-border bg-background px-3 focus-within:border-primary">
+              <Globe className="h-4 w-4 shrink-0 text-muted-foreground" />
+              <input value={website} onChange={(e) => setWebsite(e.target.value)}
+                placeholder="https://yourshop.com" type="url"
+                className="w-full bg-transparent py-2.5 pl-2 text-sm outline-none" />
+            </div>
+          </F>
+
+          {/* Social links */}
+          <div className="grid gap-4 sm:grid-cols-2">
+            <F label="WhatsApp number">
+              <input value={whatsapp} onChange={(e) => setWhatsapp(e.target.value)}
+                placeholder="+91 98765 43210" className="in" />
+            </F>
+            <F label="Instagram handle">
+              <input value={instagram} onChange={(e) => setInstagram(e.target.value)}
+                placeholder="@yourhandle" className="in" />
+            </F>
+          </div>
+
+          {err && <p className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">{err}</p>}
+
+          <div className="flex items-center justify-between gap-3 border-t border-border pt-4">
+            <p className="text-xs text-muted-foreground">
+              <ExternalLink className="inline h-3 w-3 mr-1" />
+              Your profile is visible to buyers in the marketplace.
+            </p>
+            <button type="submit" disabled={busy}
+              className="inline-flex items-center gap-2 rounded-full bg-primary px-5 py-2 text-sm font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-60">
+              {busy
+                ? <Loader2 className="h-4 w-4 animate-spin" />
+                : saved
+                  ? <Check className="h-4 w-4" />
+                  : null}
+              {saved ? "Profile saved!" : "Save profile"}
+            </button>
+          </div>
+        </form>
+      </div>
+
+      {/* Preview card – shown only when there is something to display */}
+      {(brandName || logoUrl || description) && (
+        <div className="mt-6 rounded-3xl border border-border bg-secondary/40 p-6">
+          <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Buyer-facing preview</p>
+          <div className="flex items-start gap-4">
+            {logoUrl && <img src={logoUrl} alt="logo" className="h-14 w-14 rounded-2xl object-cover border border-border shrink-0" />}
+            <div className="min-w-0">
+              <div className="font-display text-lg font-semibold">{brandName || profile?.shop_name}</div>
+              {category && <div className="mt-0.5 text-xs font-semibold uppercase tracking-wide text-primary">{category}</div>}
+              {location && <div className="mt-1 flex items-center gap-1 text-sm text-muted-foreground"><MapPin className="h-3.5 w-3.5" />{location}</div>}
+              {description && <p className="mt-2 line-clamp-3 text-sm text-muted-foreground">{description}</p>}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }

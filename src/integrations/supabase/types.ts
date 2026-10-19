@@ -95,29 +95,58 @@ export type Database = {
           price?: number
           seller_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "products_seller_id_fkey"
+            columns: ["seller_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       profiles: {
         Row: {
           area: string | null
+          brand_name: string | null
+          category: string | null
           created_at: string
+          description: string | null
           id: string
+          location: string | null
+          logo_url: string | null
           phone: string | null
           shop_name: string
+          social_links: Json | null
+          website: string | null
         }
         Insert: {
           area?: string | null
+          brand_name?: string | null
+          category?: string | null
           created_at?: string
+          description?: string | null
           id: string
+          location?: string | null
+          logo_url?: string | null
           phone?: string | null
           shop_name?: string
+          social_links?: Json | null
+          website?: string | null
         }
         Update: {
           area?: string | null
+          brand_name?: string | null
+          category?: string | null
           created_at?: string
+          description?: string | null
           id?: string
+          location?: string | null
+          logo_url?: string | null
           phone?: string | null
           shop_name?: string
+          social_links?: Json | null
+          website?: string | null
         }
         Relationships: []
       }

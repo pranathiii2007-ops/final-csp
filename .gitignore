@@ -30,3 +30,11 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+powershell.exe
+
+# Vercel
+.vercel
+
+# Temporary inspection scripts
+*.mjs
+
